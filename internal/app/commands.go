@@ -39,6 +39,8 @@ type CommandInput struct {
 	NetworkLogView model.NetworkLogView
 	// NetworkPrintJSON selects the JSON envelope of `enclave network print`.
 	NetworkPrintJSON bool
+	// Secrets is the parsed `secrets` request; nil for other verbs.
+	Secrets *cli.SecretsRequest
 	// UserCommandMount, when set, exposes the host session command tree read-only
 	// inside the container. Populated only for `enclave <name>` session
 	// commands dispatched through the run pipeline.
@@ -59,6 +61,8 @@ func dispatchCommand(input *CommandInput) int {
 		return runAuthImport(input)
 	case "auth-export":
 		return runAuthExport(input)
+	case cli.ActionSecretsSet, cli.ActionSecretsUnset, cli.ActionSecretsList:
+		return runSecrets(input)
 	case "ssh-init":
 		if err := setupSSH(); err != nil {
 			logx.Errorf("%v", err)

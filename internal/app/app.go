@@ -204,6 +204,7 @@ func Run(args []string) int {
 		NetworkPrintJSON:  parsed.NetworkPrintJSON,
 		UserCommandMount:  userCommandMount,
 		ExtRequest:        parsed.ExtRequest,
+		Secrets:           parsed.Secrets,
 		ConfiguredBackend: configuredBackend,
 	}
 	return dispatchCommand(&command)

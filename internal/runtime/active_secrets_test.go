@@ -96,7 +96,7 @@ func TestResolveActiveSecretValueEnvFirstBeatsFile(t *testing.T) {
 	}
 }
 
-func TestResolveEnvAliasValue(t *testing.T) {
+func TestResolveActiveSecretValueEnvAliases(t *testing.T) {
 	const globalFile = "/secrets/global.env"
 	const projectFile = "/secrets/projects/hash/tool.env"
 
@@ -171,21 +171,21 @@ func TestResolveEnvAliasValue(t *testing.T) {
 				t.Setenv(envVar, tt.hostEnv[envVar])
 			}
 
-			value, source, found, err := resolveEnvAliasValue(secret, tt.layers, tt.persisted)
+			value, source, found, err := resolveActiveSecretValue(secret, "", tt.layers, tt.persisted)
 			if tt.wantErr != "" {
 				if err == nil {
-					t.Fatalf("resolveEnvAliasValue() error = nil, want %q", tt.wantErr)
+					t.Fatalf("resolveActiveSecretValue() error = nil, want %q", tt.wantErr)
 				}
 				if !strings.Contains(err.Error(), "conflicting values across env aliases") || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("resolveEnvAliasValue() error = %q, want conflict naming %q", err, tt.wantErr)
+					t.Fatalf("resolveActiveSecretValue() error = %q, want conflict naming %q", err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("resolveEnvAliasValue() error = %v", err)
+				t.Fatalf("resolveActiveSecretValue() error = %v", err)
 			}
 			if found != tt.wantFound || value != tt.wantValue || source != tt.wantSource {
-				t.Fatalf("resolveEnvAliasValue() = (%q, %q, %v), want (%q, %q, %v)", value, source, found, tt.wantValue, tt.wantSource, tt.wantFound)
+				t.Fatalf("resolveActiveSecretValue() = (%q, %q, %v), want (%q, %q, %v)", value, source, found, tt.wantValue, tt.wantSource, tt.wantFound)
 			}
 		})
 	}

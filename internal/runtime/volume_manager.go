@@ -218,11 +218,7 @@ func (m volumeManager) shouldCreateEnvVolume() bool {
 }
 
 func (m volumeManager) envStoreKey() backend.StoreKey {
-	return envStoreKey(m.profile.Name, m.project.Hash)
-}
-
-func envStoreKey(owner string, projectHash string) backend.StoreKey {
-	return backend.StoreKey{Owner: owner, ProjectHash: projectHash}
+	return backend.EnvStoreKey(m.profile.Name, m.project.Hash)
 }
 
 func (m volumeManager) shouldResetAuthFiles() bool {

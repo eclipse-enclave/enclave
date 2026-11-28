@@ -32,7 +32,6 @@ See `serviceAuth.hostsFromCredential` in `docs/extensions/credentials.md` for th
 accepted value forms.
 
 `GITLAB_HOST` applies to the run that sets it and is not written to the
-persisted env store. To make it permanent, put it in a secrets file — globally
-in `~/.local/state/enclave/secrets/global.env`, or per project in
-`~/.local/state/enclave/secrets/projects/<hash>/<tool>.env`, which is keyed by
-the agent tool (e.g. `claude.env`), not by this feature.
+persisted env store. To make it permanent, put it in a
+[secrets file](../../../docs/auth.md#secrets-files): the shared global or
+project file applies to every tool's sessions with this feature.

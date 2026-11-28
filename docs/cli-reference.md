@@ -142,7 +142,13 @@ and `--json`; see [Full capture](networking.md#full-capture). See
 |---------|-------------|
 | `enclave auth import --tool <tool>` | Copy host auth files into the auth store |
 | `enclave auth export --tool <tool>` | Copy auth store files back to the host |
+| `enclave secrets set <key>` | Save an API key for every tool that uses it (`--tool`: one tool; `--project`: this project only); prompts, or reads stdin |
+| `enclave secrets unset <key>` | Remove the key and its saved copies (same flags as `set`; on both, `--secrets-scope` sets the scope their checks assume) |
+| `enclave secrets list [key]` | Show where each tool's API keys come from in this project, masked (`--tool` filters, `--secrets-scope` previews a scope) |
 | `enclave ssh-init` | Initialize isolated SSH keys at `~/.config/enclave/ssh/`. Not recommended: the key lets the agent push to your Git provider. See [SSH keys](auth.md#ssh-keys) |
+
+Keys are `anthropic`, `openai`, `gemini`, `mistral`, and `copilot-github`; see
+[Managing API keys](auth.md#managing-api-keys).
 
 ### Devcontainer
 
@@ -305,7 +311,7 @@ saves the answer as `"tool"` in `~/.config/enclave/config.json`.
 |----------|-------------------------------------|
 | Start a session or build its image: `run`, `shell`, `continue`, `resume`, `exec`, and `update` without explicit tool arguments | Ask, or fail |
 | Scope policy, stores, or containers by tool: `info`, `auth import`, `auth export`, `network …` except `add-domain`, `remove-domain`, and `set-mode`, `cleanup` without `--all`, `stop` without a session argument | Ask, or fail |
-| Never read the default tool: `ps`, `attach`, `tools`, `features`, `config`, `review-target`, `theia`, … | Neither ask nor fail; `--tool` is at most an explicit filter |
+| Never read the default tool: `ps`, `attach`, `tools`, `features`, `config`, `secrets`, `review-target`, `theia`, … | Neither ask nor fail; `--tool` is at most an explicit filter |
 
 - It asks only when stdin, stdout, and stderr are terminals and neither
   `--json` nor `--yes` is given. Otherwise, or if unanswered, the command fails

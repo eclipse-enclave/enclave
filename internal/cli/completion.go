@@ -17,6 +17,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"enclave/internal/apikeys"
 	"enclave/internal/config"
 	"enclave/internal/model"
 	"enclave/internal/netlog"
@@ -157,6 +158,13 @@ func registerCompletions(rootCmd *cobra.Command) error {
 		updateCmd.ValidArgsFunction = toolCompleter
 	}
 
+	// `secrets set|unset|list <key>` take an API key name.
+	for _, sub := range []string{"set", "unset", "list"} {
+		if cmd := findSubCommand(rootCmd, "secrets", sub); cmd != nil {
+			cmd.ValidArgsFunction = apiKeyNameCompleter
+		}
+	}
+
 	// add --name names an extension in the source, not on this host; installed
 	// names are only a hint for re-adding one.
 	for _, kind := range model.ExtensionKinds {
@@ -211,6 +219,24 @@ func registerCompletions(rootCmd *cobra.Command) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// apiKeyNameCompleter completes the API key names the installed tools
+// declare. Without extracted assets the specs cannot be read, so it offers
+// nothing rather than guessing.
+func apiKeyNameCompleter(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	paths, err := config.ResolvePathsReadOnly()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	profiles, _, _, err := config.LoadAllProfiles(paths)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return apikeys.Names(apikeys.Catalog(profiles)), cobra.ShellCompDirectiveNoFileComp
 }
 
 // extensionNameCompleter completes the built-in and user extension names of

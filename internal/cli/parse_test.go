@@ -1931,3 +1931,34 @@ func TestParseFeaturesNoneCannotCombineInEitherOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSecretsCommands(t *testing.T) {
+	tests := []struct {
+		args   []string
+		action string
+		want   SecretsRequest
+	}{
+		{[]string{"secrets", "set", "anthropic"}, ActionSecretsSet, SecretsRequest{Key: "anthropic"}},
+		{[]string{"secrets", "set", "anthropic", "--tool", "claude", "--project"}, ActionSecretsSet, SecretsRequest{Key: "anthropic", Tool: "claude", Project: true}},
+		{[]string{"secrets", "unset", "openai", "--project"}, ActionSecretsUnset, SecretsRequest{Key: "openai", Project: true}},
+		{[]string{"secrets", "set", "openai", "--secrets-scope", "project"}, ActionSecretsSet, SecretsRequest{Key: "openai"}},
+		{[]string{"secrets", "list"}, ActionSecretsList, SecretsRequest{}},
+		{[]string{"secrets", "list", "gemini", "--tool", "pi"}, ActionSecretsList, SecretsRequest{Key: "gemini", Tool: "pi"}},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			res, err := Parse(tt.args, config.DefaultOptions())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Action != tt.action || res.Secrets == nil || *res.Secrets != tt.want {
+				t.Fatalf("action = %q, request = %+v", res.Action, res.Secrets)
+			}
+		})
+	}
+	for _, args := range [][]string{{"secrets", "set"}, {"secrets", "set", "a", "b"}, {"secrets", "list", "a", "b"}} {
+		if _, err := Parse(args, config.DefaultOptions()); err == nil {
+			t.Fatalf("%v: expected an error", args)
+		}
+	}
+}

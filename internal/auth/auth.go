@@ -43,44 +43,41 @@ type SecretsLayer struct {
 	Values map[string]string
 }
 
-// ResolveSecretsLayers reads the secrets files in layer order, lowest
-// precedence first. Layer 1: global.env (always read). Layer 2:
-// global/<tool>.env (when scope is "global" or "both"). Layer 3:
-// projects/<hash>/<tool>.env (when scope is "project" or "both"). Later layers
-// override earlier ones. Files that are missing or empty are omitted.
-func ResolveSecretsLayers(home string, projectHash string, tool string, scope string) ([]SecretsLayer, error) {
-	type candidate struct {
-		path   string
-		errMsg string
-	}
-
-	candidates := []candidate{{
-		path:   config.HostSecretsGlobalSharedFile(home),
-		errMsg: "read global secrets",
-	}}
+// SecretsLayerPaths lists the secrets files a session of tool reads under
+// scope, lowest precedence first:
+//
+//  1. global.env: every tool, every project (always read)
+//  2. global/<tool>.env: one tool, every project ("global" or "both")
+//  3. projects/<hash>.env: every tool, one project ("project" or "both")
+//  4. projects/<hash>/<tool>.env: one tool, one project ("project" or "both")
+func SecretsLayerPaths(home string, projectHash string, tool string, scope string) []string {
+	paths := []string{config.HostSecretsGlobalSharedFile(home)}
 	if scope == model.SecretsScopeGlobal || scope == model.SecretsScopeBoth {
-		candidates = append(candidates, candidate{
-			path:   config.HostSecretsGlobalFile(home, tool),
-			errMsg: "read global per-tool secrets",
-		})
+		paths = append(paths, config.HostSecretsGlobalFile(home, tool))
 	}
 	if scope == model.SecretsScopeProject || scope == model.SecretsScopeBoth {
-		candidates = append(candidates, candidate{
-			path:   config.HostSecretsProjectFile(home, projectHash, tool),
-			errMsg: "read project per-tool secrets",
-		})
+		paths = append(paths,
+			config.HostSecretsProjectSharedFile(home, projectHash),
+			config.HostSecretsProjectFile(home, projectHash, tool))
 	}
+	return paths
+}
 
-	layers := make([]SecretsLayer, 0, len(candidates))
-	for _, candidate := range candidates {
-		values, err := ReadAllEnvFromFile(candidate.path)
+// ResolveSecretsLayers reads the secrets files of SecretsLayerPaths in order.
+// Later layers override earlier ones. Files that are missing or empty are
+// omitted.
+func ResolveSecretsLayers(home string, projectHash string, tool string, scope string) ([]SecretsLayer, error) {
+	paths := SecretsLayerPaths(home, projectHash, tool, scope)
+	layers := make([]SecretsLayer, 0, len(paths))
+	for _, path := range paths {
+		values, err := ReadAllEnvFromFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", candidate.errMsg, err)
+			return nil, fmt.Errorf("read secrets file %s: %w", path, err)
 		}
 		if len(values) == 0 {
 			continue
 		}
-		layers = append(layers, SecretsLayer{Path: candidate.path, Values: values})
+		layers = append(layers, SecretsLayer{Path: path, Values: values})
 	}
 	return layers, nil
 }

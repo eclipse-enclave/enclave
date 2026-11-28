@@ -50,6 +50,8 @@ type Result struct {
 	ExtRequest *extinstall.Request
 	// NetworkPrintJSON selects the JSON envelope of `enclave network print`.
 	NetworkPrintJSON bool
+	// Secrets is set for the `secrets` subcommands; nil otherwise.
+	Secrets *SecretsRequest
 }
 
 func Parse(args []string, defaults model.Options, userCmds ...usercmd.Command) (Result, error) {
@@ -148,6 +150,7 @@ directly: "enclave --tool codex" is equivalent to "enclave run --tool codex".`,
 		execCommand(res),
 		shellCommand(res),
 		authCommand(res),
+		secretsCommand(res),
 		infoCommand(res),
 		versionCommand(res),
 		simpleCommand("self-update", "Update the enclave binary from its release channel", res),

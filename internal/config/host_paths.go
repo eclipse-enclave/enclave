@@ -272,6 +272,13 @@ func HostSecretsProjectFile(home string, projectHash string, tool string) string
 	return filepath.Join(HostSecretsDir(home), "projects", projectHash, tool+".env")
 }
 
+// HostSecretsProjectSharedFile holds one project's secrets for every tool. It
+// sits beside the project's per-tool directory rather than inside it, where it
+// would collide with the file of a tool named "global".
+func HostSecretsProjectSharedFile(home string, projectHash string) string {
+	return filepath.Join(HostSecretsDir(home), "projects", projectHash+".env")
+}
+
 func HostSecretsGlobalSharedFile(home string) string {
 	return filepath.Join(HostSecretsDir(home), "global.env")
 }
